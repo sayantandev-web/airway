@@ -1,45 +1,33 @@
 <?php
-
 if (!defined('BASEPATH')) {
     exit('No direct script access allowed');
 }
-
-class Feesessiongroup_model extends MY_Model
-{
-
-    public function __construct()
-    {
+class Feesessiongroup_model extends MY_Model {
+    public function __construct() {
         parent::__construct();
         $this->current_session = $this->setting_model->getCurrentSession();
     }
-
-    public function add($data)
-    {
+    public function add($data) {
         $this->db->trans_start(); # Starting Transaction
         $this->db->trans_strict(false); # See Note 01. If you wish can remove as well
-        //=======================Code Start===========================
-        $parentid                     = $this->group_exists($data['fee_groups_id']);
+        //$parentid = $this->group_exists($data['fee_groups_id']);
+        $parentid = $this->class_exists($data['class_id']);
         $data['fee_session_group_id'] = $parentid;
         $this->db->insert('fee_groups_feetype', $data);
-        $id        = $this->db->insert_id();
-        $message   = INSERT_RECORD_CONSTANT . " On  fee groups feetype id " . $id;
+        $id = $this->db->insert_id();
+        //echo $this->db->last_query(); die();
+        $message   = INSERT_RECORD_CONSTANT . " On fee groups feetype id " . $id;
         $action    = "Insert";
         $record_id = $id;
         $this->log($message, $record_id, $action);
-        //======================Code End==============================
-
-        $this->db->trans_complete(); # Completing transaction
-        /* Optional */
-
+        $this->db->trans_complete();
         if ($this->db->trans_status() === false) {
-            # Something went wrong.
             $this->db->trans_rollback();
             return false;
         } else {
             //return $return_value;
         }
     }
-
     public function getFeesByGroupByStudent($student_session_id)
     {
         $this->db->select('fee_session_groups.*,fee_groups.name as `group_name`,IFNULL(student_fees_master.id,0) as `student_fees_master_id`');
@@ -56,7 +44,6 @@ class Feesessiongroup_model extends MY_Model
         }
         return $result;
     }
-
     public function getFeesByGroup($id = null,$display_system=NULL)
     {
         $this->db->select('fee_session_groups.*,fee_groups.name as `group_name`,fee_groups.is_system');
@@ -81,6 +68,29 @@ class Feesessiongroup_model extends MY_Model
         return $result;
     }
 
+    public function getFeesByClass($id = null,$display_system=NULL) {
+        $this->db->select('fee_groups_feetype.*, classes.class as course, sessions.session');
+        $this->db->from('fee_groups_feetype');
+        $this->db->join('classes', 'classes.id = fee_groups_feetype.class_id');
+        $this->db->join('sessions', 'sessions.id = fee_groups_feetype.session_id');
+        $this->db->where('fee_groups_feetype.session_id', $this->current_session);
+        if ($display_system !== NULL) {
+            //$this->db->where('fee_groups.is_system', $display_system);
+        }
+
+        if ($id != null) {
+            $this->db->where('fee_session_groups.id', $id);
+        }
+        //$this->db->order_by('fee_groups.id', 'asc');
+        $this->db->order_by('fee_groups_feetype.id', 'asc');
+        $query = $this->db->get();
+        $result = $query->result();
+        foreach ($result as $key => $value) {
+            $value->feetypes = $this->getfeeTypeByGroup($value->id, $value->fee_groups_id);
+        }
+        return $result;
+    }
+
     public function getfeeTypeByGroup($fee_session_group_id, $id = null)
     {
         $this->db->select('fee_groups_feetype.*,feetype.type,feetype.code');
@@ -93,8 +103,7 @@ class Feesessiongroup_model extends MY_Model
         return $query->result();
     }
 
-    public function group_exists($fee_groups_id)
-    {
+    public function group_exists($fee_groups_id) {
         $this->db->where('fee_groups_id', $fee_groups_id);
         $this->db->where('session_id', $this->current_session);
         $query = $this->db->get('fee_session_groups');
@@ -107,11 +116,22 @@ class Feesessiongroup_model extends MY_Model
         }
     }
 
-    public function remove($id)
-    {
-        $this->db->trans_start(); # Starting Transaction
-        $this->db->trans_strict(false); # See Note 01. If you wish can remove as well
-        //=======================Code Start===========================
+    public function class_exists($class_id) {
+        $this->db->where('id', $class_id);
+        //$this->db->where('session_id', $this->current_session);
+        $query = $this->db->get('classes');
+        if ($query->num_rows() > 0) {
+            return $query->row()->id;
+        } else {
+            $data = array('class_id' => $class_id, 'session_id' => $this->current_session);
+            $this->db->insert('fee_session_groups', $data);
+            return $this->db->insert_id();
+        }
+    }
+
+    public function remove($id) {
+        $this->db->trans_start();
+        $this->db->trans_strict(false);
         $sql = "delete fee_groups_feetype.* FROM fee_groups_feetype JOIN fee_session_groups ON fee_session_groups.id = fee_groups_feetype.fee_session_group_id WHERE fee_session_groups.id = ?";
         $this->db->query($sql, array($id));
         $this->db->where('id', $id);
@@ -121,15 +141,31 @@ class Feesessiongroup_model extends MY_Model
         $action    = "Delete";
         $record_id = $id;
         $this->log($message, $record_id, $action);
-        //======================Code End==============================
-        $this->db->trans_complete(); # Completing transaction
-        /* Optional */
+        $this->db->trans_complete();
         if ($this->db->trans_status() === false) {
-            # Something went wrong.
             $this->db->trans_rollback();
             return false;
         } else {
-            //return $return_value;
+        }
+    }
+
+    public function removefees($id) {
+        $this->db->trans_start();
+        $this->db->trans_strict(false);
+        $sql = "DELETE FROM fee_groups_feetype WHERE fee_groups_feetype.id = ?";
+        $this->db->query($sql, array($id));
+        //$this->db->where('id', $id);
+        //$this->db->delete('fee_session_groups');
+
+        $message   = DELETE_RECORD_CONSTANT . " On fee session groups id " . $id;
+        $action    = "Delete";
+        $record_id = $id;
+        $this->log($message, $record_id, $action);
+        $this->db->trans_complete();
+        if ($this->db->trans_status() === false) {
+            $this->db->trans_rollback();
+            return false;
+        } else {
         }
     }
 
